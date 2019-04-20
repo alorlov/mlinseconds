@@ -27,7 +27,6 @@ LOSSES = {
         'MSELoss': nn.MSELoss(reduction='mean'),
         'SELoss': nn.MSELoss(reduction='sum'),
         'BCELoss': nn.BCELoss(),
-        'VotersLoss': (1+1),
         }
 
 ACTIVATIONS_GRID = {
@@ -60,7 +59,6 @@ class SolutionFirstModel(nn.Module):
         return self.fc(x)
 
     def calc_loss(self, output, target):
-#        loss = ((output-target)**2*(0.6**(1-target))).mean()
         loss = LOSSES[self.params['loss']](output, target)
         return loss
         
@@ -72,8 +70,8 @@ class SolutionModel(nn.Module):
     def __init__(self, input_size, output_size, params):
         super(SolutionModel, self).__init__()
         self.params = params
-        self.input_size = input_size // params.features_size
-        self.activations = ['relu'] + (['relu'] * (len(params.hidden_sizes) - 1)) + ['sigmoid']
+        self.input_size = input_size // params.features_size * params.features_out_size
+        self.activations = ['sigmoid'] + (['relu'] * (len(params.hidden_sizes) - 1)) + ['sigmoid']
         
         if params.grid_search.enabled:
             torch.manual_seed(params.random)
@@ -93,26 +91,15 @@ class SolutionModel(nn.Module):
         params1 = {
             'input_size': params.features_size,
             'hidden_sizes': params.hidden_sizes1,
-            'loss': 'MSELoss',
-            'lr': params.lr1,
-            'momentum': 0.9,
             'batch_norm': True,
-            'weight_decay': 1e-7,
-            'lr_step_size': params.lr_step_size1,
         }
-        first_model[0] = SolutionFirstModel(params1['input_size'], 1, params1)
+        first_model[0] = SolutionFirstModel(params1['input_size'], params.features_out_size, params1)
 
     def forward(self, data):
-        outputs = torch.FloatTensor()
+        output = first_model[0](data.view(-1, self.params.features_size))
+        first_model[0].output = output.view(-1, self.input_size)
         
-        for b in range(self.input_size):
-            start = b * self.params.features_size
-            end = (b+1) * self.params.features_size
-            # evaluate model
-            output = first_model[0](data[:,start:end])
-            outputs = torch.cat([outputs, output], dim=1)
-        first_model[0].output = outputs
-        return self.fc(outputs.detach())
+        return self.fc(first_model[0].output)
 
     def calc_loss(self, output, target):
         loss = LOSSES[self.params.loss](output, target)
@@ -126,65 +113,66 @@ class Solution():
     def __init__(self):
         self.sols = {}
         self.solsSum = {}
-        self.plot_main_key = 'hidden_sizes1'
+        self.plot_main_key = 'lr'
         
+        # General settings
         self.features_size = 8
+        self.features_out_size = 2
+        self.batch_size = 256
+        self.batch_norm = True
         
         # First Model
         layers1 = 2
-        self.lr1 = .01
-        self.hidden_sizes1 = [34] * layers1
-        self.lr_step_size1 = [10000]
+        self.hidden_sizes1 = [30] * layers1
 
         # Main Model
-        layers = 2
-        self.hidden_sizes = [10] * layers
+        layers = 1
+        self.hidden_sizes = [15] * layers
+        self.lr = 0.02
         
         self.loss = 'MSELoss'
-        self.lr = .1
-        self.momentum = 0.9
-        self.batch_size = 256
-        self.batch_norm = True
+        self.momentum = 0.5
+        
         self.lr_factor = 0.1
-        self.lr_step_size = [10000]
+        self.lr_step_size = [100000]
         self.weight_decay = 0
         self.prob_out = 0
         
-        self.random = 10
+        self.random = 3
         
+#        self.features_out_size_grid = [1,2,3,4]
+#        
+#        layers_range = [2]
+#        self.hidden_sizes1_grid = [
+#            [i] * n
+##            for i in [80]
+#            for n in layers_range
+#            for i in [30, 60, 90]#np.around(np.geomspace(4, 100, 4)).astype(int)
+#        ]
 #        layers_range = [1,2]
 #        self.hidden_sizes_grid = [
 #            [i] * n
 ##            for i in [80]
 #            for n in layers_range
-#            for i in [10, 20, 40, 80]#np.around(np.geomspace(4, 100, 4)).astype(int)
+#            for i in np.around(np.geomspace(4, 60, 5)).astype(int)
 #        ]
-#        layers_range = [1,2]
-#        self.hidden_sizes1_grid = [
-#            [i] * n
-##            for i in [80]
-#            for n in layers_range
-#            for i in [10, 20, 40, 80]#np.around(np.geomspace(4, 100, 4)).astype(int)
-#        ]
-
-#        self.lr1_grid = np.round(np.geomspace(0.001, 1., 4), 5)
-#        self.lr_grid = np.append(0.01, np.round(np.linspace(0.005, 0.04, 5), 5)) #Adam
+#        self.lr_grid = np.round(np.geomspace(0.001, 1., 4), 5)
+        self.lr_grid = [.08, .04, .02, .01, .008]
 
 #        self.batch_size_grid = np.around(np.geomspace(128, 512, 3, dtype=int)).astype(int)
         
 #        self.loss_grid = list(LOSSES)
         
-#        self.momentum_grid = np.round(1 - 10**(-1 - np.random.rand(10)), 5)
-#        self.momentum_grid = [0.5, 0.9, 0.95, 0.975, 0.99, 0.995]
+        self.momentum_grid = [0, .1, .2, 0.5, .7, 0.9, 0.95, 0.975, 0.99, 0.995]
         
 #        self.lr_factor_grid = [0.1, 0.5]
-#        self.lr_step_size_grid = [[i] for i in [50, 100, 1e+5]]
+#        self.lr_step_size_grid = [[i] for i in [100, 1e+5]]
         
 #        self.weight_decay_grid = np.append(0, np.geomspace(1e-6, 1e-2, 5))
 #        self.prob_out_grid = np.append(0, np.geomspace(0.01, 0.1, 4))
         
-#        self.random_grid = range(6,11)
-        self.merge_random_param = False
+        self.random_grid = range(6,11)
+        self.merge_random_param = True
         
         self.grid_search = GridSearch(self).set_enabled(IS_GRID_SEARCH)
 
@@ -202,7 +190,7 @@ class Solution():
     def train_model(self, model, train_data, train_target, context):
         # get off noise
         break_on_correct = True
-        tune = True
+        tune = 0
         random_size = len(self.random_grid) if hasattr(self, 'random_grid') else 1
         
         if self.grid_search.enabled:
@@ -222,18 +210,17 @@ class Solution():
             if self.sols[key] == -1:
                 return
         step = 0
-        
         model1 = first_model[0]
 
         # Put model in train mode
         model.train()
-        model1.train()
         
 #        optimizer = optim.SGD(model.parameters(), lr=self.lr, momentum=self.momentum, weight_decay=self.weight_decay)
-        optimizer1 = optim.Adam(model1.parameters(), lr=model1.params['lr'], betas=(model1.params['momentum'], 0.999), weight_decay=model1.params['weight_decay'])
-        scheduler1 = optim.lr_scheduler.MultiStepLR(optimizer1, milestones=model1.params['lr_step_size'], gamma=0.1)
-        
-        optimizer = optim.Adam(model.parameters(), lr=self.lr, betas=(self.momentum, 0.999), weight_decay=self.weight_decay)
+        optimizer = optim.Adam([
+                                    {'params': model1.parameters()},
+                                    {'params': model.parameters()},
+                                ],
+            lr=self.lr, betas=(self.momentum, 0.999), weight_decay=self.weight_decay)
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.lr_step_size, gamma=self.lr_factor)
         
         train_dataset = Data.TensorDataset(train_data, train_target)
@@ -254,55 +241,47 @@ class Solution():
                 
                 # model.parameters()...gradient set to zero
                 optimizer.zero_grad()
-                optimizer1.zero_grad()
+#                optimizer1.zero_grad()
                 
                 data = train_data_mini
                 target = train_target_mini
                 
                 # evaluate model => model.forward(data)
                 output = model(data)
-                output1 = (model1.output.sum(dim=1) / 2).view_as(output)
                 # if x < 0.5 predict 0 else predict 1
                 predict = output.round()
+                predict1 = (model1.output.round().sum(dim=1) > (model.input_size / 2)).type_as(target)
                 # Number of correct predictions
                 correct = predict.eq(target.view_as(predict)).long().sum().item()
+                correct1 = predict1.eq(target.view_as(predict1)).long().sum().item()
                 # Total number of needed predictions
                 total = target.view(-1).size(0)
                 
                 accuracy = correct/total*100
+                accuracy1 = correct1/total
                 self.grid_search.log_step_value('ratio', accuracy, step)
                 
                 # calculate loss
-                loss1 = model1.calc_loss(output1, target)
                 loss = model.calc_loss(output, target)
 
                 if self.grid_search.enabled:
-#                    ACCS[plot_main_key][key].append(accuracy)
                     ACCS[plot_main_key][key].append(loss)
-                    ACCS[plot_main_key + '_model1'][key].append(loss1)
+                    ACCS[plot_main_key + '_model1'][key].append(correct1/total)
                 
                 self.grid_search.log_step_value('loss', loss.item(), step)
+
                 
                 # calculate deriviative of model.forward() and put it in model.parameters()...gradient
                 loss.backward()
-                loss1.backward()
 
                 # print progress of the learning
-                if tune and step % 100 == 0:
+                if tune and step % 50 == 0:
                     print("Step = {} Prediction = {}/{} Ratio = {:.3f} Error = {:.4f}/{:.4f} time = {:.1f}"
-                          .format(step, correct, total, correct/total, loss1.item(), loss.item(), time_left))
-#                    print(np.round(torch.cat([model1.output, output1, target, output], dim=1)[:20].tolist(),2))
-#                    print(model1.fc[0], list(model1.fc[0].parameters()))
-#                    print(get_lr(optimizer1))
-#                    if step == 2: break
-
+                          .format(step, correct, total, correct/total, loss.item(), 1 - accuracy1, time_left))
+                
                 # update model: model.parameters() -= lr * gradient
                 optimizer.step()
-                optimizer1.step()
-                
                 scheduler.step()
-                scheduler1.step()
-                
                 step += 1
             else:
                 if total == correct:
@@ -311,7 +290,6 @@ class Solution():
                         if self.grid_search.enabled:
                             self.sols[key] += 1
                             self.solsSum[key] += step
-#                            print(np.round(torch.cat([m1_out, output1, target, output], dim=1)[:20].tolist(),2))
                             print("{:.4f} {} {:.1f}".format(step, key, context.get_timer().get_execution_time()))
                             if self.sols[key] == random_size and random_size > 1:
                                 print('---confirmed {:.4f} ---'.format(float(self.solsSum[key])/self.sols[key]))
@@ -395,8 +373,8 @@ class Config:
 tic = time.time()
 ACCS = {}
 IS_GRID_SEARCH = 0
-CASE_NUMBER = 4
-TIME_LIMIT = 8.0
+CASE_NUMBER = -1
+TIME_LIMIT = 2.0
 
 sm.SolutionManager(Config()).run(case_number=CASE_NUMBER)
 
@@ -409,7 +387,7 @@ if len(ACCS) > 0:
             axs[i].plot(values, label=key)
         axs[i].legend()
         axs[i].set_xlabel('steps')
-        axs[i].set_ylabel('accuracy')
+#        axs[i].set_ylabel('accuracy')
         axs[i].set_title(main_key)
 #        axs[i].set_ylim(0, 0.5)
 
